@@ -1,0 +1,176 @@
+/* General styles for mobile app */
+body {
+  margin: 0;
+  font-family: 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
+  /* Prevent overscroll bounce effect on iOS */
+  overscroll-behavior-y: contain;
+  /* Prevent zoom on double-tap */
+  touch-action: manipulation;
+}
+
+/* Fix for 100vh issue on mobile browsers */
+html, body, #root {
+  height: 100%;
+}
+
+/* Remove blue highlight when clicking on links/buttons on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Generic app container */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* Page content container with bottom padding for navigation */
+.page-content {
+  flex: 1;
+  padding: 16px;
+  padding-bottom: 72px; /* Space for bottom navigation */
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+/* Mobile-first typography */
+h1 {
+  font-size: 1.5rem;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+/* Mobile card styles */
+.mobile-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  margin-bottom: 16px;
+  background-color: #fff;
+}
+
+/* Bottom navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background-color: #fff;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+/* Auth pages centered content */
+.auth-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.auth-paper {
+  padding: 24px;
+  border-radius: 12px;
+}
+
+/* QR code scanner container */
+.scanner-container {
+  position: relative;
+  width: 100%;
+  height: 70vh;
+  overflow: hidden;
+  border-radius: 8px;
+  background-color: #000;
+}
+
+/* Animated pulse for scanning effect */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.scan-target {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 200px;
+  height: 200px;
+  border: 2px solid #4CAF50;
+  border-radius: 12px;
+  animation: pulse 2s infinite;
+}
+
+/* Swipeable event cards */
+.event-card-swipeable {
+  user-select: none;
+  touch-action: pan-y;
+}
+
+/* Helper for no scrollbar but still scrollable */
+.hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* Mobile badge display */
+.badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+}
+
+.badge-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+/* Fix for bottom safe area on iOS */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .bottom-nav {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .page-content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+}

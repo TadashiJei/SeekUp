@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#4CAF50">
+  <title>SEEKUP - Offline</title>
+  <style>
+    body {
+      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Oxygen', 'Ubuntu', sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      text-align: center;
+    }
+    
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 2rem;
+      color: #4CAF50;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      color: #4CAF50;
+    }
+    
+    p {
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+      color: #666;
+      max-width: 600px;
+    }
+    
+    .card {
+      background-color: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .button {
+      display: inline-block;
+      background-color: #4CAF50;
+      color: white;
+      padding: 0.8rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 500;
+      margin-top: 1rem;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    
+    .button:hover {
+      background-color: #3d8b40;
+    }
+    
+    .cached-content {
+      border-top: 1px solid #eee;
+      margin-top: 2rem;
+      padding-top: 1rem;
+      width: 100%;
+      max-width: 480px;
+    }
+    
+    .footer {
+      text-align: center;
+      padding: 1rem;
+      font-size: 0.8rem;
+      color: #999;
+      border-top: 1px solid #eee;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-color: #292929;
+        color: #eee;
+      }
+      
+      .card {
+        background-color: #333;
+      }
+      
+      p {
+        color: #bbb;
+      }
+      
+      .footer {
+        color: #888;
+        border-top-color: #444;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12,2L1,12h3v8h6v-6h4v6h6v-8h3L12,2z M12,5c-1.1,0-2-0.9-2-2s0.9-2,2-2s2,0.9,2,2S13.1,5,12,5z"/>
+      </svg>
+    </div>
+    
+    <h1>You're Offline</h1>
+    
+    <div class="card">
+      <p>You're currently offline, but don't worry! Some SEEKUP features are still available.</p>
+      
+      <p>You can view cached events and your saved volunteer information. Any actions you take will be synchronized when you're back online.</p>
+      
+      <button class="button" id="retry-button">Retry Connection</button>
+    </div>
+    
+    <div class="cached-content" id="cached-events">
+      <h2>Your Cached Events</h2>
+      <p id="cached-events-message">Loading cached events...</p>
+      <div id="cached-events-list"></div>
+    </div>
+  </div>
+  
+  <div class="footer">
+    SEEKUP &copy; 2025 - Connecting volunteers with organizations
+  </div>
+  
+  <script>
+    // Check if the network is back online
+    document.getElementById('retry-button').addEventListener('click', function() {
+      window.location.reload();
+    });
+    
+    // Try to display cached events from IndexedDB
+    (function() {
+      const displayCachedEvents = function() {
+        if (!('indexedDB' in window)) {
+          document.getElementById('cached-events-message').textContent = 
+            'Offline storage not available in your browser.';
+          return;
+        }
+        
+        const request = indexedDB.open('seekupOfflineDB', 1);
+        
+        request.onerror = function() {
+          document.getElementById('cached-events-message').textContent = 
+            'Could not access offline data.';
+        };
+        
+        request.onsuccess = function(event) {
+          const db = event.target.result;
+          
+          if (!db.objectStoreNames.contains('events')) {
+            document.getElementById('cached-events-message').textContent = 
+              'No cached events available.';
+            return;
+          }
+          
+          const transaction = db.transaction(['events'], 'readonly');
+          const eventsStore = transaction.objectStore('events');
+          const eventsRequest = eventsStore.getAll();
+          
+          eventsRequest.onsuccess = function() {
+            const events = eventsRequest.result;
+            
+            if (events.length === 0) {
+              document.getElementById('cached-events-message').textContent = 
+                'No cached events available.';
+              return;
+            }
+            
+            document.getElementById('cached-events-message').textContent = 
+              `Found ${events.length} cached events.`;
+            
+            const eventsList = document.getElementById('cached-events-list');
+            
+            events.forEach(function(event) {
+              const eventCard = document.createElement('div');
+              eventCard.className = 'card';
+              eventCard.style.marginTop = '1rem';
+              
+              const eventDate = new Date(event.startDate);
+              const formattedDate = eventDate.toLocaleDateString(undefined, { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+              });
+              
+              eventCard.innerHTML = `
+                <h3 style="margin-top: 0;">${event.title}</h3>
+                <p style="margin-bottom: 0.5rem;"><strong>${formattedDate}</strong> at ${event.location.city}</p>
+                <p style="margin-bottom: 0;">${event.description.substring(0, 100)}${event.description.length > 100 ? '...' : ''}</p>
+              `;
+              
+              eventsList.appendChild(eventCard);
+            });
+          };
+          
+          eventsRequest.onerror = function() {
+            document.getElementById('cached-events-message').textContent = 
+              'Failed to retrieve cached events.';
+          };
+        };
+      };
+      
+      // Try to display cached events
+      displayCachedEvents();
+      
+      // Listen for online status changes
+      window.addEventListener('online', function() {
+        document.getElementById('retry-button').click();
+      });
+    })();
+  </script>
+</body>
+</html>

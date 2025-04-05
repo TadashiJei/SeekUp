@@ -1,0 +1,129 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Build outputs
+build/
+dist/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backend specific
+backend/build/
+backend/dist/
+backend/.env
+backend/.env.*
+backend/.next/
+backend/.cache/
+backend/node_modules/
+
+# Web app specific
+web-app/build/
+web-app/dist/
+web-app/.env
+web-app/.env.*
+web-app/.next/
+web-app/.cache/
+web-app/node_modules/
+
+# Mobile app specific
+mobile-app/build/
+mobile-app/dist/
+mobile-app/.env
+mobile-app/.env.*
+mobile-app/.next/
+mobile-app/.cache/
+mobile-app/node_modules/
+mobile-app/android/app/build/
+mobile-app/ios/build/
+mobile-app/ios/Pods/
+mobile-app/ios/.symlinks/
+mobile-app/ios/Podfile.lock
+mobile-app/ios/SeekUp.xcworkspace/xcuserdata/
+
+# Database
+*.sqlite3
+*.db
+*.sqlitedb
+
+# Coverage reports
+coverage/
+
+# Local development files
+*.local
+*.local.js
+*.local.json
+*.local.ts
+*.local.tsx
+
+# Cache files
+.cache/
+next-env.d.ts
+next-env.d.ts.map
+
+# Firebase
+.firebase/
+
+# Testing
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor
+*.swp
+*.swo
+
+# Debug
+*.pdb
+*.map
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
