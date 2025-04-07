@@ -9,7 +9,6 @@ import {
   CardActionArea,
   Button, 
   Chip,
-  Avatar,
   Divider,
   CircularProgress,
   Alert,
@@ -24,6 +23,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import { getCachedEvents, cacheEvents } from '../utils/offlineDataManager';
 
 // Event Card Component
 const EventCard = ({ event, onClick }) => {
@@ -72,16 +72,18 @@ const EventCard = ({ event, onClick }) => {
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
             <LocationIcon fontSize="small" color="action" sx={{ mr: 1 }} />
             <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
-              {event.location.city}
+              {event.location?.city || 'Location not specified'}
             </Typography>
             
-            <Chip 
-              label={event.category.replace(/-/g, ' ')} 
-              size="small" 
-              color="primary"
-              variant="outlined"
-              sx={{ ml: 'auto', textTransform: 'capitalize' }}
-            />
+            {event.category && (
+              <Chip 
+                label={event.category.replace(/-/g, ' ')} 
+                size="small" 
+                color="primary"
+                variant="outlined"
+                sx={{ ml: 'auto', textTransform: 'capitalize' }}
+              />
+            )}
           </Box>
         </CardContent>
       </CardActionArea>
@@ -112,27 +114,133 @@ function Home() {
       try {
         setLoading(true);
         setError(null);
+        
+        // Check network connection first
+        if (!navigator.onLine) {
+          // Try to get data from cache if offline
+          const cachedEvents = await getCachedEvents();
+          if (cachedEvents && cachedEvents.length > 0) {
+            // Filter for upcoming events
+            const today = new Date();
+            const upcoming = cachedEvents.filter(event => 
+              new Date(event.startDate) > today
+            );
+            setUpcomingEvents(upcoming.slice(0, 3));
+            setRecommendedEvents(cachedEvents.slice(0, 5));
+          } else {
+            setError('You are offline and no cached events are available');
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Development mode check - same as in other components
+        const isDevelopmentMode = true; // TEMPORARY: Set to true for testing
+        
+        if (isDevelopmentMode) {
+          // Use mock data in development mode
+          const mockEvents = [
+            {
+              id: '1',
+              title: 'Community Park Cleanup',
+              description: 'Join us for a day of cleaning up the local park.',
+              organization: 'Green City Initiative',
+              startDate: '2025-04-15T09:00:00',
+              image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d',
+              location: {
+                city: 'San Francisco',
+                address: '123 Green Park Ave'
+              },
+              category: 'environment'
+            },
+            {
+              id: '2',
+              title: 'Food Drive Volunteer',
+              description: 'Help distribute food to those in need.',
+              organization: 'City Food Bank',
+              startDate: '2025-04-20T10:00:00',
+              image: 'https://images.unsplash.com/photo-1593113646773-028c64a8f1b8',
+              location: {
+                city: 'Oakland',
+                address: '456 Charity Street'
+              },
+              category: 'community-service'
+            },
+            {
+              id: '3',
+              title: 'After-School Tutoring',
+              description: 'Tutor elementary school students in math and reading.',
+              organization: 'Education for All',
+              startDate: '2025-04-22T15:00:00',
+              image: 'https://images.unsplash.com/photo-1503676382389-4809596d5290',
+              location: {
+                city: 'Berkeley',
+                address: '789 Learning Center Blvd'
+              },
+              category: 'education'
+            }
+          ];
+          
+          setUpcomingEvents(mockEvents);
+          setRecommendedEvents([...mockEvents, 
+            {
+              id: '4',
+              title: 'Elderly Care Visit',
+              description: 'Visit and assist elderly residents at local care homes.',
+              organization: 'Elder Care Alliance',
+              startDate: '2025-04-25T14:00:00',
+              image: 'https://images.unsplash.com/photo-1576091160550-2173dba999ef',
+              location: {
+                city: 'San Jose',
+                address: '101 Senior Care Drive'
+              },
+              category: 'healthcare'
+            }
+          ]);
+          
+          // Cache mock events for offline access
+          await cacheEvents(mockEvents);
+          
+          setLoading(false);
+          return;
+        }
 
         // Different API endpoints based on user type
         if (user?.userType === 'volunteer') {
-          // Fetch upcoming events the volunteer is registered for
-          const registeredRes = await axios.get('/api/users/events?status=registered&limit=3');
-          setUpcomingEvents(registeredRes.data.events || []);
+          try {
+            // Fetch upcoming events the volunteer is registered for
+            const registeredRes = await axios.get('/api/users/events?status=registered&limit=3');
+            setUpcomingEvents(registeredRes.data.events || []);
+          } catch (err) {
+            console.log('Unable to fetch registered events:', err);
+            // Fallback to recommended events if registered events fail
+            setUpcomingEvents([]);
+          }
           
-          // Fetch recommended events based on user profile
-          const recommendedRes = await axios.get('/api/events/recommended?limit=5');
-          setRecommendedEvents(recommendedRes.data.events || []);
+          try {
+            // Fetch recommended events based on user profile
+            const recommendedRes = await axios.get('/api/events/recommended?limit=5');
+            setRecommendedEvents(recommendedRes.data.events || []);
+          } catch (err) {
+            console.log('Unable to fetch recommended events:', err);
+            setRecommendedEvents([]);
+          }
         } else if (user?.userType === 'organization') {
-          // Fetch organization's upcoming events
-          const eventsRes = await axios.get('/api/organizations/events?upcoming=true&limit=5');
-          setUpcomingEvents(eventsRes.data.events || []);
+          try {
+            // Fetch organization's upcoming events
+            const eventsRes = await axios.get('/api/organizations/events?upcoming=true&limit=5');
+            setUpcomingEvents(eventsRes.data.events || []);
+          } catch (err) {
+            console.log('Unable to fetch organization events:', err);
+            setUpcomingEvents([]);
+          }
         }
         
         setLoading(false);
       } catch (err) {
+        console.error('Home data fetch error:', err);
         setError('Failed to load events');
         setLoading(false);
-        console.error('Home data fetch error:', err);
       }
     };
     
@@ -222,9 +330,9 @@ function Home() {
             {upcomingEvents.length > 0 ? (
               upcomingEvents.map((event) => (
                 <EventCard 
-                  key={event._id} 
+                  key={event._id || event.id} 
                   event={event} 
-                  onClick={() => navigate(`/events/${event._id}`)} 
+                  onClick={() => navigate(`/events/${event._id || event.id}`)} 
                 />
               ))
             ) : (
@@ -312,9 +420,9 @@ function Home() {
             {recommendedEvents.length > 0 ? (
               recommendedEvents.map((event) => (
                 <EventCard 
-                  key={event._id} 
+                  key={event._id || event.id} 
                   event={event} 
-                  onClick={() => navigate(`/events/${event._id}`)} 
+                  onClick={() => navigate(`/events/${event._id || event.id}`)} 
                 />
               ))
             ) : (
@@ -375,9 +483,9 @@ function Home() {
             {upcomingEvents.length > 0 ? (
               upcomingEvents.map((event) => (
                 <EventCard 
-                  key={event._id} 
+                  key={event._id || event.id} 
                   event={event} 
-                  onClick={() => navigate(`/events/${event._id}`)} 
+                  onClick={() => navigate(`/events/${event._id || event.id}`)} 
                 />
               ))
             ) : (

@@ -12,7 +12,11 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  Snackbar
+  Snackbar,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
@@ -24,10 +28,12 @@ import {
 import { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import { storePendingCheckIn } from '../utils/offlineDataManager';
 
 function Scan() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  // Using user in offline check and permission validation
+  const { user: currentUser } = useAuth();
   const scannerRef = useRef(null);
   const qrCodeScanner = useRef(null);
   
@@ -51,26 +57,53 @@ function Scan() {
       .then(devices => {
         if (mounted) {
           setCameras(devices);
-          // Select back camera by default if available
-          const backCamera = devices.find(camera => 
-            camera.label.toLowerCase().includes('back') || 
-            camera.label.toLowerCase().includes('rear')
-          );
-          setSelectedCamera(backCamera?.id || (devices.length > 0 ? devices[0].id : null));
+          if (devices.length > 0) {
+            setSelectedCamera(devices[0].id);
+          }
         }
       })
       .catch(err => {
         console.error('Error getting cameras', err);
-        setError('Unable to access camera. Please grant camera permissions.');
+        if (mounted) {
+          setError('Unable to access camera. Please check permissions and try again.');
+        }
       });
-      
+    
     return () => {
       mounted = false;
-      // Stop scanner if active
+      // Cleanup function runs when component unmounts
       if (qrCodeScanner.current) {
-        qrCodeScanner.current.stop()
-          .catch(err => console.error('Error stopping scanner', err));
-        qrCodeScanner.current = null;
+        try {
+          if (qrCodeScanner.current.isScanning) {
+            // Try/catch to handle potential errors during stop
+            try {
+              qrCodeScanner.current.stop().catch(err => {
+                console.log('Ignoring error during unmount cleanup:', err);
+              });
+            } catch (err) {
+              console.log('Caught error during scanner stop:', err);
+            }
+          }
+          
+          // Reset the ref
+          qrCodeScanner.current = null;
+        } catch (err) {
+          console.error('Error in cleanup:', err);
+        }
+      }
+      
+      // Directly handle scanner DOM element cleanup regardless of qrCodeScanner ref state
+      try {
+        const scannerElement = document.getElementById('qr-reader');
+        if (scannerElement) {
+          // Remove all event listeners and clear all child nodes
+          const newElement = scannerElement.cloneNode(false);
+          if (scannerElement.parentNode) {
+            scannerElement.parentNode.replaceChild(newElement, scannerElement);
+          }
+        }
+      } catch (err) {
+        console.error('Error cleaning up scanner element:', err);
       }
     };
   }, []);
@@ -111,15 +144,40 @@ function Scan() {
   const stopScanner = () => {
     if (!qrCodeScanner.current) return;
     
-    qrCodeScanner.current.stop()
-      .then(() => {
+    try {
+      // Only attempt to stop if scanner is running
+      if (qrCodeScanner.current.isScanning) {
+        qrCodeScanner.current.stop()
+          .then(() => {
+            setScanning(false);
+            
+            // Clear the scanner element to prevent DOM errors
+            const scannerElement = document.getElementById('qr-reader');
+            if (scannerElement) {
+              // Replace the element instead of removing children one by one
+              const newElement = scannerElement.cloneNode(false);
+              if (scannerElement.parentNode) {
+                scannerElement.parentNode.replaceChild(newElement, scannerElement);
+              }
+            }
+            
+            qrCodeScanner.current = null;
+          })
+          .catch(err => {
+            console.error('Error stopping scanner', err);
+            setError('Error stopping scanner');
+            setScanning(false);
+            qrCodeScanner.current = null;
+          });
+      } else {
         setScanning(false);
         qrCodeScanner.current = null;
-      })
-      .catch(err => {
-        console.error('Error stopping scanner', err);
-        setError('Error stopping scanner');
-      });
+      }
+    } catch (err) {
+      console.error('Error stopping scanner', err);
+      setScanning(false);
+      qrCodeScanner.current = null;
+    }
   };
   
   // Toggle flashlight/torch
@@ -145,83 +203,100 @@ function Scan() {
   
   // Handle successful scan
   const onScanSuccess = async (decodedText) => {
-    // Stop scanner
-    stopScanner();
+    // Capture the mounted state at the start of the function
+    let isMounted = true;
+    
+    // Create a cleanup function to ensure we don't update state after unmounting
+    const handleCleanup = () => {
+      if (!isMounted) return;
+      
+      try {
+        // Clear the scanner element to prevent DOM errors
+        const scannerElement = document.getElementById('qr-reader');
+        if (scannerElement) {
+          // Replace the element instead of removing children one by one
+          const newElement = scannerElement.cloneNode(false);
+          if (scannerElement.parentNode) {
+            scannerElement.parentNode.replaceChild(newElement, scannerElement);
+          }
+        }
+      } catch (err) {
+        console.error('Error in scan success cleanup:', err);
+      }
+    };
+    
+    if (!isMounted) return;
+    setScanning(false);
     setScanResult(decodedText);
+    setProcessing(true);
     
     try {
-      // Parse QR code data
-      let eventId, action;
-      
-      // Expect format: seekup://check-in/{eventId} or seekup://event/{eventId}
-      if (decodedText.startsWith('seekup://')) {
-        const parts = decodedText.split('/');
-        action = parts[2];
-        eventId = parts[3];
-      } else {
-        // Try to parse as JSON if it's not in the URI format
+      // Stop scanner after successful scan
+      if (qrCodeScanner.current) {
         try {
-          const data = JSON.parse(decodedText);
-          eventId = data.eventId;
-          action = data.action;
-        } catch (e) {
-          // If it's just an ID, assume it's an event ID for check-in
-          eventId = decodedText;
-          action = 'check-in';
+          if (qrCodeScanner.current.isScanning) {
+            await qrCodeScanner.current.stop();
+          }
+          qrCodeScanner.current = null;
+        } catch (err) {
+          console.error('Error stopping scanner after successful scan:', err);
+        } finally {
+          handleCleanup();
         }
       }
       
-      if (!eventId) {
-        setError('Invalid QR code format');
+      // Check if we're offline
+      if (!navigator.onLine) {
+        // Store check-in data for later sync
+        await storePendingCheckIn({
+          eventId: decodedText,
+          userId: currentUser?.id,
+          timestamp: new Date().toISOString()
+        });
+        
+        if (isMounted) {
+          setSuccessMessage('Check-in stored offline. Will sync when online.');
+          setSuccessSnackbar(true);
+          setProcessing(false);
+        }
         return;
       }
       
-      // Process based on action
-      if (action === 'check-in') {
-        await processCheckIn(eventId);
-      } else if (action === 'event') {
-        // Navigate to event detail page
-        navigate(`/events/${eventId}`);
-      } else {
-        setError('Unknown QR code action');
+      // Online - process immediately
+      const response = await axios.post('/api/events/check-in', { 
+        eventId: decodedText,
+        userId: currentUser?.id 
+      });
+      
+      if (isMounted) {
+        if (response.data.success) {
+          setSuccessMessage(response.data.message || 'Check-in successful!');
+          setSuccessSnackbar(true);
+        } else {
+          setError(response.data.message || 'Check-in failed. Please try again.');
+        }
       }
     } catch (err) {
-      console.error('Error processing QR code', err);
-      setError('Failed to process QR code');
+      console.error('Error processing scan', err);
+      if (isMounted) {
+        setError('Error processing scan. Please try again.');
+      }
+    } finally {
+      if (isMounted) {
+        setProcessing(false);
+      }
     }
+    
+    // Define cleanup function
+    return () => {
+      isMounted = false;
+    };
   };
   
   // Handle scan failure
   const onScanFailure = (error) => {
     // Ignoring errors since the scanner continuously reports errors when no QR code is found
     // console.error('QR scan error', error);
-  };
-  
-  // Process check-in
-  const processCheckIn = async (eventId) => {
-    setProcessing(true);
-    
-    try {
-      const response = await axios.post(`/api/events/${eventId}/check-in`, {}, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      // Show success message
-      setSuccessMessage(response.data.message || 'Successfully checked in!');
-      setSuccessSnackbar(true);
-      
-      // Navigate to event details after a short delay
-      setTimeout(() => {
-        navigate(`/events/${eventId}`);
-      }, 2000);
-    } catch (err) {
-      console.error('Check-in error', err);
-      setError(err.response?.data?.message || 'Failed to check in to event');
-    } finally {
-      setProcessing(false);
-    }
   };
   
   // Reset scanner and try again
@@ -262,6 +337,24 @@ function Scan() {
           alignItems: 'center'
         }}
       >
+        {/* Camera Selection */}
+        <FormControl sx={{ width: '100%', maxWidth: 400, mb: 2 }}>
+          <InputLabel id="camera-select-label">Select Camera</InputLabel>
+          <Select
+            labelId="camera-select-label"
+            id="camera-select"
+            value={selectedCamera}
+            label="Select Camera"
+            onChange={(e) => setSelectedCamera(e.target.value)}
+          >
+            {cameras.map((camera) => (
+              <MenuItem key={camera.id} value={camera.id}>
+                {camera.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        
         {/* Camera View */}
         <Box 
           id="qr-reader" 
@@ -328,7 +421,7 @@ function Scan() {
               onClick={toggleTorch}
               disabled={!scanning}
             >
-              {torchEnabled ? <FlashOnIcon /> : <FlashOffIcon />}
+              {torchEnabled ? <FlashIcon /> : <FlashOffIcon />}
             </IconButton>
           </Box>
         )}

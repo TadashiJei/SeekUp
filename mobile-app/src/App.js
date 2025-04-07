@@ -1,26 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { 
+  BrowserRouter as Router, 
+  Routes, 
+  Route, 
+  Navigate, 
+  useLocation
+} from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, Box, Snackbar, Alert } from '@mui/material';
+import { CssBaseline, Box, Snackbar, Alert, CircularProgress } from '@mui/material';
 
 // Auth Provider
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+
+// Components
+import AppBottomNavigation from './components/BottomNavigation';
+import AppFeatureManager from './components/AppFeatureManager';
+import InstallPrompt from './components/InstallPrompt';
 
 // Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Home from './pages/Home';
+import EventDetails from './pages/EventDetails';
 import Explore from './pages/Explore';
-import EventDetail from './pages/EventDetail';
 import Scan from './pages/Scan';
 import Passport from './pages/Passport';
 import Profile from './pages/Profile';
 import Onboarding from './pages/Onboarding';
 import NotFound from './pages/NotFound';
-
-// Components
-import BottomNavigation from './components/BottomNavigation';
-import InstallPrompt from './components/InstallPrompt';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
 
 // Create theme for mobile app
 const theme = createTheme({
@@ -80,26 +88,54 @@ const theme = createTheme({
 
 // Protected route component
 const ProtectedRoute = ({ children, allowedRoles = [] }) => {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, user, loading } = useAuth();
+  const location = useLocation();
 
+  useEffect(() => {
+    // Store the requested page for redirect after login
+    if (!isAuthenticated && !loading) {
+      sessionStorage.setItem('redirectAfterLogin', location.pathname);
+    }
+  }, [isAuthenticated, loading, location]);
+
+  // Loading state
   if (loading) {
-    return <Box sx={{ p: 3, textAlign: 'center' }}>Loading...</Box>;
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
   }
 
+  // Check if user is authenticated
   if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles.length > 0 && !allowedRoles.includes(user.userType)) {
-    return <Navigate to="/" />;
+  // Check if user has required role (if specified)
+  if (
+    allowedRoles.length > 0 &&
+    user &&
+    !allowedRoles.includes(user.userType)
+  ) {
+    return <Navigate to="/home" replace />;
   }
 
+  // User is authenticated and has required role
   return children;
 };
 
 function AppContent() {
   const { user, isAuthenticated, loading, error, clearError } = useAuth();
   const [showPWAPrompt, setShowPWAPrompt] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [isFirstLaunch, setIsFirstLaunch] = useState(false);
@@ -115,19 +151,17 @@ function AppContent() {
   
   // Check if the app can be installed as PWA
   useEffect(() => {
-    let deferredPrompt;
-    
     const handleBeforeInstallPrompt = (e) => {
-      // Prevent Chrome 76+ from automatically showing the prompt
+      // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
       // Stash the event so it can be triggered later
-      deferredPrompt = e;
-      // Update UI to notify the user they can add to home screen
+      setDeferredPrompt(e);
+      // Update UI to notify the user they can install the PWA
       setShowPWAPrompt(true);
     };
-    
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
@@ -185,7 +219,7 @@ function AppContent() {
           } />
           <Route path="/events/:id" element={
             <ProtectedRoute>
-              <EventDetail />
+              <EventDetails />
             </ProtectedRoute>
           } />
           <Route path="/scan" element={
@@ -203,6 +237,11 @@ function AppContent() {
               <Profile />
             </ProtectedRoute>
           } />
+          <Route path="/analytics" element={
+            <ProtectedRoute allowedRoles={['organization']}>
+              <AnalyticsDashboard />
+            </ProtectedRoute>
+          } />
           
           {/* 404 Route */}
           <Route path="*" element={<NotFound />} />
@@ -210,26 +249,34 @@ function AppContent() {
         
         {/* Bottom Navigation - only show when authenticated */}
         {isAuthenticated && !loading && (
-          <BottomNavigation userType={user?.userType} />
+          <AppBottomNavigation userType={user?.userType} />
         )}
+        
+        {/* Add feature manager for notifications and offline support */}
+        {isAuthenticated && !loading && (
+          <AppFeatureManager />
+        )}
+        
+        {/* PWA Install Prompt */}
+        {showPWAPrompt && (
+          <InstallPrompt
+            deferredPrompt={deferredPrompt}
+            onClose={() => setShowPWAPrompt(false)}
+          />
+        )}
+        
+        {/* Snackbar for Errors */}
+        <Snackbar
+          open={snackbarOpen}
+          autoHideDuration={6000}
+          onClose={handleCloseSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
+            {snackbarMessage}
+          </Alert>
+        </Snackbar>
       </Router>
-      
-      {/* PWA Install Prompt */}
-      {showPWAPrompt && (
-        <InstallPrompt onClose={() => setShowPWAPrompt(false)} />
-      )}
-      
-      {/* Snackbar for Errors */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert onClose={handleCloseSnackbar} severity="error" sx={{ width: '100%' }}>
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }

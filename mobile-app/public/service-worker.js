@@ -1,59 +1,54 @@
-// Enhanced Service Worker for SEEKUP PWA
-const CACHE_NAME = 'seekup-cache-v2';
-const DATA_CACHE_NAME = 'seekup-data-cache-v1';
+/* eslint-disable no-restricted-globals */
+// Tell ESLint that using 'self' in service workers is okay
 
-// Assets to precache (App Shell)
-const APP_SHELL_CACHE = [
+const CACHE_NAME = 'seekup-cache-v1';
+const DATA_CACHE_NAME = 'seekup-data-cache-v1';
+const OFFLINE_URL = '/offline.html';
+const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/static/js/main.chunk.js',
-  '/static/js/0.chunk.js',
-  '/static/js/bundle.js',
   '/manifest.json',
-  '/favicon.ico',
   '/logo192.png',
-  '/logo512.png',
-  '/offline.html' // Fallback page when offline
+  '/offline.html',
+  '/static/media/placeholder-logo.png'
+  // Don't include dynamic JS chunks that might not be available during install
+  // These will be cached when they're actually requested
 ];
 
-// Cached API routes for offline access
-const API_ROUTES_TO_CACHE = [
-  '/api/events',
-  '/api/users/profile'
-];
+// Comment out unused variable to fix the lint error
+// const API_ROUTES_TO_CACHE = [
+//   '/api/events',
+//   '/api/events/recommended'
+// ];
 
 // Install the service worker and cache the app shell
 self.addEventListener('install', event => {
   console.log('[ServiceWorker] Install');
   
   event.waitUntil(
-    Promise.all([
-      // Cache app shell assets
-      caches.open(CACHE_NAME).then(cache => {
+    caches.open(CACHE_NAME)
+      .then(cache => {
         console.log('[ServiceWorker] Caching app shell');
-        return cache.addAll(APP_SHELL_CACHE);
-      }),
-      
-      // Precache critical API data for offline access
-      caches.open(DATA_CACHE_NAME).then(cache => {
-        console.log('[ServiceWorker] Caching API data');
         return Promise.all(
-          API_ROUTES_TO_CACHE.map(url => {
-            return fetch(url)
-              .then(response => {
-                if (response.status === 200) {
-                  return cache.put(url, response);
-                }
-              })
-              .catch(err => console.log(`Failed to cache ${url}: ${err}`));
-          })
+          STATIC_ASSETS.map(url => 
+            cache.add(url).catch(error => {
+              console.log(`[ServiceWorker] Failed to cache: ${url}`, error);
+              // Continue despite failure for individual assets
+              return null;
+            })
+          )
         );
       })
-    ])
+      .then(() => {
+        console.log('[ServiceWorker] App shell cached successfully');
+        return self.skipWaiting();
+      })
+      .catch(error => {
+        console.error('[ServiceWorker] Cache installation failed:', error);
+        // Continue with service worker installation even if caching fails
+        return self.skipWaiting();
+      })
   );
-  
-  // Activate new service worker immediately
-  self.skipWaiting();
 });
 
 // Define different caching strategies based on request type
@@ -141,7 +136,7 @@ self.addEventListener('fetch', event => {
         .then(response => {
           // If we couldn't fetch the page from network, return offline fallback
           if (!response) {
-            return caches.match('/offline.html');
+            return caches.match(OFFLINE_URL);
           }
           return response;
         })
@@ -346,7 +341,7 @@ self.addEventListener('notificationclick', event => {
   }
   
   event.waitUntil(
-    clients.matchAll({ type: 'window' })
+    self.clients.matchAll({ type: 'window' })
       .then(windowClients => {
         // If a window client already exists, focus it and navigate
         for (const client of windowClients) {
@@ -355,7 +350,7 @@ self.addEventListener('notificationclick', event => {
           }
         }
         // Otherwise open a new window
-        return clients.openWindow(url);
+        return self.clients.openWindow(url);
       })
   );
 });

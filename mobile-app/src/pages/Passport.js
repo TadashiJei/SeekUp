@@ -281,6 +281,19 @@ function Passport() {
         setLoading(true);
         setError(null);
         
+        // Development mode check - same as in App.js
+        const isDevelopmentMode = true; // TEMPORARY: Set to true for testing
+
+        if (isDevelopmentMode) {
+          // Use mock data for development testing
+          setEvents(dummyEvents);
+          setAchievements(dummyAchievements);
+          setStats(dummyStats);
+          setLoading(false);
+          return;
+        }
+        
+        // Production code - real API calls
         // Get user's registered and completed events
         const eventsResponse = await axios.get('/api/users/events');
         setEvents(eventsResponse.data.events || []);
@@ -304,7 +317,50 @@ function Passport() {
     fetchPassportData();
   }, []);
   
-  // Dummy data for preview (remove in production)
+  // Dummy data for development testing
+  const dummyStats = {
+    totalHours: 17,
+    eventsAttended: 7,
+    impactScore: 85,
+    skillsUsed: ['Teaching', 'Organization', 'Communication'],
+    topCauses: ['Education', 'Environment', 'Community Development']
+  };
+  
+  // Dummy events for development testing
+  const dummyEvents = [
+    {
+      id: '1',
+      title: 'Community Park Cleanup',
+      organization: 'Green City Initiative',
+      date: '2023-05-15T09:00:00',
+      location: 'Central Park',
+      status: 'completed',
+      hours: 3,
+      image: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d'
+    },
+    {
+      id: '2',
+      title: 'Food Drive Volunteer',
+      organization: 'City Food Bank',
+      date: '2023-04-22T10:00:00',
+      location: 'Downtown Community Center',
+      status: 'completed',
+      hours: 4,
+      image: 'https://images.unsplash.com/photo-1593113630400-ea4288922497'
+    },
+    {
+      id: '3',
+      title: 'Literacy Program Helper',
+      organization: 'ReadMore Foundation',
+      date: '2023-06-05T14:00:00',
+      location: 'Public Library',
+      status: 'upcoming',
+      hours: 2,
+      image: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b'
+    }
+  ];
+  
+  // Dummy data for achievements
   const dummyAchievements = [
     {
       id: 1,

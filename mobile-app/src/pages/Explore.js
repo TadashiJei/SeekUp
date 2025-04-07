@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Box, 
@@ -22,17 +22,23 @@ import {
   Drawer,
   Button,
   Slider,
-  Stack,
-  Divider
+  Divider,
+  Snackbar
 } from '@mui/material';
 import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   Clear as ClearIcon,
   AccessTime as TimeIcon,
-  LocationOn as LocationIcon
+  LocationOn as LocationIcon,
+  WifiOff as OfflineIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { 
+  cacheEvents, 
+  getCachedEvents 
+} from '../utils/offlineDataManager';
+import { isOnline } from '../utils/notificationUtils';
 
 // Categories for events
 const EVENT_CATEGORIES = [
@@ -137,6 +143,8 @@ function Explore() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [networkStatus, setNetworkStatus] = useState(isOnline());
+  const [showOfflineAlert, setShowOfflineAlert] = useState(false);
   
   // Filter states
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -147,58 +155,262 @@ function Explore() {
     date: ''
   });
   
-  // Load events on component mount or when filters change
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        setLoading(true);
-        
-        // Build query parameters based on filters and tab selection
-        let queryParams = new URLSearchParams();
-        
-        // Apply tab filter
-        if (activeTab === 1) {
-          queryParams.append('upcoming', 'true');
-        } else if (activeTab === 2) {
-          queryParams.append('popular', 'true');
+  // Mock data for development testing - wrapped in useMemo to prevent recreation on each render
+  const dummyEvents = useMemo(() => [
+    {
+      id: '1',
+      title: 'Community Park Cleanup',
+      description: 'Join us for a day of cleaning up the local park and planting new trees.',
+      organization: 'Green City Initiative',
+      startDate: '2025-04-15T09:00:00',
+      endDate: '2025-04-15T12:00:00',
+      location: {
+        address: '123 Park Avenue',
+        city: 'San Francisco',
+        state: 'CA',
+        zip: '94107'
+      },
+      category: 'environmental',
+      spots: 25,
+      spotsRemaining: 10,
+      image: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d'
+    },
+    {
+      id: '2',
+      title: 'Food Drive Distribution',
+      description: 'Help distribute food to families in need at our monthly food drive.',
+      organization: 'City Food Bank',
+      startDate: '2025-04-22T10:00:00',
+      endDate: '2025-04-22T14:00:00',
+      location: {
+        address: '456 Main Street',
+        city: 'Oakland',
+        state: 'CA',
+        zip: '94612'
+      },
+      category: 'community',
+      spots: 15,
+      spotsRemaining: 5,
+      image: 'https://images.unsplash.com/photo-1593113630400-ea4288922497'
+    },
+    {
+      id: '3',
+      title: 'Literacy Program for Kids',
+      description: 'Volunteer to help children improve their reading skills through our literacy program.',
+      organization: 'ReadMore Foundation',
+      startDate: '2025-04-18T14:00:00',
+      endDate: '2025-04-18T16:00:00',
+      location: {
+        address: '789 Library Lane',
+        city: 'San Jose',
+        state: 'CA',
+        zip: '95113'
+      },
+      category: 'education',
+      spots: 10,
+      spotsRemaining: 3,
+      image: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b'
+    },
+    {
+      id: '4',
+      title: 'Animal Shelter Care Day',
+      description: 'Spend a day caring for animals at our local shelter. Tasks include walking dogs, socializing cats, and cleaning kennels.',
+      organization: 'Paws & Claws Rescue',
+      startDate: '2025-04-20T09:00:00',
+      endDate: '2025-04-20T13:00:00',
+      location: {
+        address: '567 Pet Boulevard',
+        city: 'Sacramento',
+        state: 'CA',
+        zip: '95814'
+      },
+      category: 'animal-welfare',
+      spots: 12,
+      spotsRemaining: 8,
+      image: 'https://images.unsplash.com/photo-1601758174114-e711c0cbaa69'
+    },
+    {
+      id: '5',
+      title: 'Community Health Fair',
+      description: 'Volunteer at our annual health fair providing free health screenings and information to the community.',
+      organization: 'HealthyLife Foundation',
+      startDate: '2025-04-25T10:00:00',
+      endDate: '2025-04-25T16:00:00',
+      location: {
+        address: '321 Hospital Drive',
+        city: 'Fremont',
+        state: 'CA',
+        zip: '94538'
+      },
+      category: 'health',
+      spots: 20,
+      spotsRemaining: 15,
+      image: 'https://images.unsplash.com/photo-1576091160550-2173dba999ef'
+    }
+  ], []);
+  
+  // Apply client-side filtering to events (used for both cached and mock data)
+  const filterEventsClientSide = useCallback((eventsData) => {
+    let filteredEvents = [...eventsData];
+    
+    // Apply search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filteredEvents = filteredEvents.filter(event => 
+        event.title?.toLowerCase().includes(query) || 
+        event.description?.toLowerCase().includes(query) ||
+        event.category?.toLowerCase().includes(query) ||
+        event.organization?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Apply category filter
+    if (filters.category) {
+      filteredEvents = filteredEvents.filter(event => 
+        event.category === filters.category
+      );
+    }
+    
+    // Apply tab filters
+    if (activeTab === 1) { // Upcoming events
+      const today = new Date();
+      filteredEvents = filteredEvents.filter(event => 
+        new Date(event.startDate) > today
+      );
+    } else if (activeTab === 2) { // Popular events (events with few spots remaining)
+      filteredEvents = filteredEvents.filter(event => 
+        event.spots && event.spotsRemaining && 
+        (event.spotsRemaining / event.spots) < 0.5
+      );
+    }
+    
+    return filteredEvents;
+  }, [searchQuery, filters.category, activeTab]);
+  
+  // Fetch events function - wrapped in useCallback to avoid dependency issues
+  const fetchEvents = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // Development mode check - same as in App.js
+      const isDevelopmentMode = true; // TEMPORARY: Set to true for testing
+
+      // Handle offline state first
+      if (!networkStatus && !isDevelopmentMode) {
+        const cachedData = await getCachedEvents();
+        if (cachedData && cachedData.length > 0) {
+          // Apply client-side filtering to cached data
+          let filteredEvents = filterEventsClientSide(cachedData);
+          setEvents(filteredEvents);
+          setLoading(false);
+          return;
+        } else {
+          setError('You are offline and no cached events are available.');
+          setLoading(false);
+          return;
         }
-        
-        // Apply search
-        if (searchQuery) {
-          queryParams.append('search', searchQuery);
-        }
-        
-        // Apply filters
-        if (filters.category) {
-          queryParams.append('category', filters.category);
-        }
-        
-        if (filters.skillLevel) {
-          queryParams.append('skillLevel', filters.skillLevel);
-        }
-        
-        if (filters.date) {
-          queryParams.append('date', filters.date);
-        }
-        
-        // Add location and distance params if available from user profile or device
-        // This would typically use geolocation API
-        // queryParams.append('lat', userLocation.lat);
-        // queryParams.append('lng', userLocation.lng);
-        queryParams.append('distance', filters.distance);
-        
-        const response = await axios.get(`/api/events?${queryParams.toString()}`);
-        setEvents(response.data.events || []);
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching events:', err);
-        setError('Failed to load events. Please try again.');
-        setLoading(false);
       }
+
+      if (isDevelopmentMode) {
+        // Filter mock data based on search query for a better test experience
+        let filteredEvents = filterEventsClientSide(dummyEvents);
+        setEvents(filteredEvents);
+        
+        // Cache the mock events for offline access (in development mode)
+        await cacheEvents(dummyEvents);
+        setLoading(false);
+        return;
+      }
+      
+      // Production code below
+      // Build query parameters based on filters and tab selection
+      let queryParams = new URLSearchParams();
+      
+      // Apply tab filter
+      if (activeTab === 1) {
+        queryParams.append('upcoming', 'true');
+      } else if (activeTab === 2) {
+        queryParams.append('popular', 'true');
+      }
+      
+      // Apply search
+      if (searchQuery) {
+        queryParams.append('search', searchQuery);
+      }
+      
+      // Apply filters
+      if (filters.category) {
+        queryParams.append('category', filters.category);
+      }
+      
+      if (filters.skillLevel) {
+        queryParams.append('skillLevel', filters.skillLevel);
+      }
+      
+      if (filters.date) {
+        queryParams.append('date', filters.date);
+      }
+      
+      // Add location and distance params if available from user profile or device
+      // This would typically use geolocation API
+      // queryParams.append('lat', userLocation.lat);
+      // queryParams.append('lng', userLocation.lng);
+      queryParams.append('distance', filters.distance);
+      
+      const response = await axios.get(`/api/events?${queryParams.toString()}`);
+      const fetchedEvents = response.data.events || [];
+      setEvents(fetchedEvents);
+      
+      // Cache events for offline access
+      await cacheEvents(fetchedEvents);
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching events:', err);
+      
+      // Try to fetch from cache if network request fails
+      try {
+        const cachedData = await getCachedEvents();
+        if (cachedData && cachedData.length > 0) {
+          let filteredEvents = filterEventsClientSide(cachedData);
+          setEvents(filteredEvents);
+          setError('Using cached events. Some information may not be up to date.');
+        } else {
+          setError('Failed to load events. Please try again later.');
+        }
+      } catch (cacheErr) {
+        setError('Failed to load events. Please try again later.');
+      }
+      
+      setLoading(false);
+    }
+  }, [activeTab, searchQuery, filters, networkStatus, filterEventsClientSide, dummyEvents]);
+  
+  // Monitor network status
+  useEffect(() => {
+    const handleOnline = () => {
+      setNetworkStatus(true);
+      // Refresh data when coming back online
+      fetchEvents();
     };
     
+    const handleOffline = () => {
+      setNetworkStatus(false);
+      setShowOfflineAlert(true);
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [fetchEvents]);
+  
+  // Load events on component mount or when filters change
+  useEffect(() => {
     fetchEvents();
-  }, [activeTab, searchQuery, filters]);
+  }, [fetchEvents]);
   
   // Handle search input
   const handleSearchChange = (e) => {
@@ -261,6 +473,17 @@ function Explore() {
         />
       </Box>
       
+      {/* Network Status Indicator (only show when offline) */}
+      {!networkStatus && (
+        <Alert 
+          severity="warning" 
+          icon={<OfflineIcon />}
+          sx={{ mb: 2 }}
+        >
+          You're offline. Showing cached events.
+        </Alert>
+      )}
+      
       {/* Tabs and Filters */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Tabs 
@@ -282,7 +505,7 @@ function Explore() {
       
       {/* Error Message */}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mt: 2, mb: 2 }}>
           {error}
         </Alert>
       )}
@@ -296,9 +519,9 @@ function Explore() {
         ) : events.length > 0 ? (
           events.map(event => (
             <EventCard 
-              key={event._id} 
+              key={event.id} 
               event={event} 
-              onClick={() => navigate(`/events/${event._id}`)} 
+              onClick={() => navigate(`/events/${event.id}`)} 
             />
           ))
         ) : (
@@ -422,6 +645,14 @@ function Explore() {
           </Button>
         </Box>
       </Drawer>
+      
+      {/* Offline Alert Snackbar */}
+      <Snackbar
+        open={showOfflineAlert}
+        autoHideDuration={3000}
+        onClose={() => setShowOfflineAlert(false)}
+        message="You are offline. Showing cached events."
+      />
     </Box>
   );
 }
