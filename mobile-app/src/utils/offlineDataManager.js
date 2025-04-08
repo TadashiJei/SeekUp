@@ -100,19 +100,49 @@ export const storePendingRegistration = async (eventId, userData) => {
 };
 
 // Store a pending event check-in to be synced when online
-export const storePendingCheckIn = async (eventId) => {
+export const storePendingCheckIn = async (checkInData) => {
   try {
+    // Validate input data
+    if (!checkInData || !checkInData.eventId) {
+      console.error('Invalid check-in data provided');
+      return false;
+    }
+
     const db = await initDB();
-    await db.add('checkins', {
-      eventId,
-      timestamp: Date.now(),
-      status: 'pending'
-    });
+    
+    // Store with additional metadata for better tracking
+    const checkInToStore = {
+      eventId: checkInData.eventId,
+      userId: checkInData.userId || 'anonymous',
+      timestamp: checkInData.timestamp || new Date().toISOString(),
+      location: checkInData.location || null,
+      deviceInfo: {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        language: navigator.language
+      },
+      networkStatus: navigator.onLine ? 'offline' : 'offline', // Explicitly marked as offline since we're storing for later
+      status: 'pending',
+      syncAttempts: 0,
+      lastSyncAttempt: null
+    };
+    
+    // Save to local IndexedDB
+    await db.add('checkins', checkInToStore);
     
     // Request background sync if supported
     if ('serviceWorker' in navigator && 'SyncManager' in window) {
       const registration = await navigator.serviceWorker.ready;
       await registration.sync.register('sync-event-checkin');
+      console.log('Background sync for check-in registered');
+      
+      // Notify service worker about the new pending check-in
+      if (registration.active) {
+        registration.active.postMessage({
+          type: 'NEW_PENDING_CHECKIN',
+          data: checkInToStore
+        });
+      }
     }
     
     return true;

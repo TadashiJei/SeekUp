@@ -27,8 +27,10 @@ import Scan from './pages/Scan';
 import Passport from './pages/Passport';
 import Profile from './pages/Profile';
 import Onboarding from './pages/Onboarding';
+import Verification from './pages/Verification';
 import NotFound from './pages/NotFound';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import NotificationSettings from './pages/NotificationSettings';
 
 // Create theme for mobile app
 const theme = createTheme({
@@ -237,9 +239,20 @@ function AppContent() {
               <Profile />
             </ProtectedRoute>
           } />
+          <Route path="/verification" element={
+            <ProtectedRoute>
+              <Verification />
+            </ProtectedRoute>
+          } />
+
           <Route path="/analytics" element={
             <ProtectedRoute allowedRoles={['organization']}>
               <AnalyticsDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/notifications/settings" element={
+            <ProtectedRoute>
+              <NotificationSettings />
             </ProtectedRoute>
           } />
           

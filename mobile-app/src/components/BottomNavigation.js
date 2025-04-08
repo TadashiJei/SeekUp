@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   BottomNavigation as MuiBottomNavigation, 
   BottomNavigationAction, 
-  Paper 
+  Paper
 } from '@mui/material';
 import {
   Home as HomeIcon,
@@ -11,10 +11,10 @@ import {
   QrCodeScanner as ScanIcon,
   EmojiEvents as PassportIcon,
   Person as ProfileIcon,
-  Event as EventIcon,
   Add as AddIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import NotificationBadge from './notifications/NotificationBadge';
 
 function AppBottomNavigation() {
   const navigate = useNavigate();
@@ -22,8 +22,8 @@ function AppBottomNavigation() {
   const { user } = useAuth();
   const [value, setValue] = useState(0);
   
-  // Define path-to-index mapping
-  const pathToIndex = {
+  // Define path-to-index mapping using useMemo to avoid recreating on each render
+  const pathToIndex = React.useMemo(() => ({
     '/': 0,
     '/home': 0,
     '/explore': 1,
@@ -31,7 +31,7 @@ function AppBottomNavigation() {
     '/passport': 3,
     '/events/create': 2, // For organizations, this is in position 2
     '/profile': 4
-  };
+  }), []);
   
   // Update the selected tab based on the current path
   useEffect(() => {
@@ -45,7 +45,7 @@ function AppBottomNavigation() {
     else if (currentPath.startsWith('/events/') && currentPath !== '/events/create') {
       setValue(1); // Explore tab (since events are usually accessed from there)
     }
-  }, [location.pathname]);
+  }, [location.pathname, pathToIndex]);
   
   // Don't show navigation on authentication pages
   if (['/login', '/register'].includes(location.pathname)) {
@@ -106,6 +106,13 @@ function AppBottomNavigation() {
           label="Profile" 
           icon={<ProfileIcon />} 
           onClick={() => handleNavigation('/profile')} 
+        />
+        
+        {/* Separate tab just for notifications */}
+        <BottomNavigationAction 
+          label="Notifications" 
+          icon={<NotificationBadge color="primary" disableIconButton={true} />} 
+          onClick={() => handleNavigation('/notifications/settings')} 
         />
       </MuiBottomNavigation>
     </Paper>

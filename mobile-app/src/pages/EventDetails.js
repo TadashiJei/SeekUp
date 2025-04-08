@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Box, 
@@ -52,6 +52,27 @@ function EventDetails() {
     specialRequirements: ''
   });
 
+  // Function to check if an event ID is for an offline event
+  const isOfflineEventId = useCallback((id) => {
+    return id && typeof id === 'string' && id.startsWith('temp_');
+  }, []);
+
+  // Function to get offline events
+  const getOfflineEvents = useCallback(() => {
+    try {
+      return JSON.parse(localStorage.getItem('seekup_offline_events') || '[]');
+    } catch (error) {
+      console.error('Error parsing offline events:', error);
+      return [];
+    }
+  }, []);
+
+  // Function to get an offline event by ID
+  const getOfflineEventById = useCallback((id) => {
+    const offlineEvents = getOfflineEvents();
+    return offlineEvents.find(event => event.id === id);
+  }, [getOfflineEvents]);
+
   // Fetch event data
   useEffect(() => {
     let isMounted = true;
@@ -70,11 +91,47 @@ function EventDetails() {
           return;
         }
         
+        // Check if this is an offline/temporary event
+        if (isOfflineEventId(eventId)) {
+          const offlineEvent = getOfflineEventById(eventId);
+          if (offlineEvent && isMounted) {
+            setEvent({
+              ...offlineEvent,
+              // Add any necessary derived fields for display
+              spotsRemaining: offlineEvent.maxVolunteers || 10,
+              spots: offlineEvent.maxVolunteers || 10,
+              skillsRequired: offlineEvent.requiredSkills || []
+            });
+            setLoading(false);
+            setError('This is an offline-created event that will be synchronized when you connect to the internet.');
+            return;
+          } else if (isMounted) {
+            setError('Could not find the offline event. It may have been removed.');
+            setLoading(false);
+            return;
+          }
+        }
+        
         // If offline, try to get from cache
         if (!navigator.onLine) {
+          // First check regular cache
           const cachedEvent = await getCachedEvent(eventId);
           if (cachedEvent && isMounted) {
             setEvent(cachedEvent);
+            setLoading(false);
+            return;
+          } 
+          
+          // Then check if it's in our localStorage offline events
+          const offlineEvents = getOfflineEvents();
+          const matchingEvent = offlineEvents.find(e => e.id === eventId);
+          if (matchingEvent && isMounted) {
+            setEvent({
+              ...matchingEvent,
+              spotsRemaining: matchingEvent.maxVolunteers || 10,
+              spots: matchingEvent.maxVolunteers || 10,
+              skillsRequired: matchingEvent.requiredSkills || []
+            });
             setLoading(false);
             return;
           } else if (isMounted) {
@@ -84,31 +141,103 @@ function EventDetails() {
           }
         }
         
+        // Before making API call, ensure we have a token
+        const token = localStorage.getItem('token');
+        if (!token) {
+          if (isMounted) {
+            setError('Authentication required. Please log in to view event details.');
+            setLoading(false);
+          }
+          return;
+        }
+        
         // Online - fetch from API
-        const response = await axios.get(`/api/events/${eventId}`);
+        const response = await axios.get(`/api/events/${eventId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
         if (isMounted) {
-          setEvent(response.data);
+          // Check if response data is valid
+          if (!response.data) {
+            throw new Error('Invalid response from server');
+          }
+          
+          // Handle different response formats
+          if (response.data.event) {
+            // Some APIs nest the event data
+            setEvent(response.data.event);
+          } else {
+            // Direct event data in response
+            setEvent(response.data);
+          }
+          
+          // Cache the event for offline access
+          try {
+            localStorage.setItem(`event_${eventId}`, JSON.stringify(response.data));
+          } catch (cacheErr) {
+            console.warn('Failed to cache event data:', cacheErr);
+          }
         }
       } catch (err) {
         console.error('Error fetching event details:', err);
         
-        // Try from cache as fallback
-        try {
-          const cachedEvent = await getCachedEvent(eventId);
-          if (cachedEvent && isMounted) {
-            setEvent(cachedEvent);
-            setError('Using cached event data. Some information may not be up to date.');
-          } else if (isMounted) {
-            setError('Failed to load event details. Please try again later.');
+        // Handle specific error types
+        if (err.response) {
+          if (err.response.status === 401) {
+            if (isMounted) {
+              setError('Your session has expired. Please log in again to view this event.');
+            }
+          } else if (err.response.status === 404) {
+            if (isMounted) {
+              setError('Event not found. It may have been removed or you may not have permission to view it.');
+            }
+          } else {
+            // Try from cache as fallback for other errors
+            tryFetchFromCache();
           }
-        } catch (cacheErr) {
-          if (isMounted) {
-            setError('Failed to load event details. Please try again later.');
-          }
+        } else {
+          // Network or other error, try cache
+          tryFetchFromCache();
         }
       } finally {
         if (isMounted) {
           setLoading(false);
+        }
+      }
+    };
+    
+    // Helper function to try fetching from cache in error scenarios
+    const tryFetchFromCache = async () => {
+      try {
+        // First check regular cache
+        const cachedEvent = await getCachedEvent(eventId);
+        if (cachedEvent && isMounted) {
+          setEvent(cachedEvent);
+          setError('Using cached event data. Some information may not be up to date.');
+          return;
+        }
+        
+        // Then check offline events
+        const offlineEvent = getOfflineEventById(eventId);
+        if (offlineEvent && isMounted) {
+          setEvent({
+            ...offlineEvent,
+            spotsRemaining: offlineEvent.maxVolunteers || 10,
+            spots: offlineEvent.maxVolunteers || 10,
+            skillsRequired: offlineEvent.requiredSkills || []
+          });
+          setError('Using offline event data.');
+          return;
+        }
+        
+        if (isMounted) {
+          setError('Failed to load event details. Please try again later.');
+        }
+      } catch (cacheErr) {
+        if (isMounted) {
+          setError('Failed to load event details. Please try again later.');
         }
       }
     };
@@ -118,7 +247,7 @@ function EventDetails() {
     return () => {
       isMounted = false;
     };
-  }, [eventId]);
+  }, [eventId, getOfflineEventById, isOfflineEventId, getOfflineEvents]);
   
   // Monitor network status
   useEffect(() => {

@@ -245,35 +245,118 @@ function Scan() {
         }
       }
       
-      // Check if we're offline
+      // Try to extract eventId from QR code
+      // The QR code could be a simple ID or a JSON string with more data
+      let eventId = decodedText;
+      let eventData = null;
+      try {
+        // Check if the decodedText is a JSON string
+        const parsedData = JSON.parse(decodedText);
+        if (parsedData && parsedData.eventId) {
+          eventId = parsedData.eventId;
+          eventData = parsedData;
+        }
+      } catch (e) {
+        // Not JSON, assume it's a plain eventId
+        console.log('QR code is not in JSON format, using as plain eventId');
+      }
+      
+      // Attempt to get user geolocation for better check-in data
+      let userLocation = null;
+      try {
+        if (navigator.geolocation) {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              timeout: 10000,
+              maximumAge: 60000,
+              enableHighAccuracy: true
+            });
+          });
+          
+          userLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          };
+        }
+      } catch (err) {
+        console.log('Could not get user location:', err);
+        // Continue without location data
+      }
+      
+      // Prepare check-in data with enhanced metadata
+      const checkInData = {
+        eventId: eventId,
+        userId: currentUser?.id,
+        timestamp: new Date().toISOString(),
+        location: userLocation,
+        eventData: eventData,
+        networkStatus: navigator.onLine ? 'online' : 'offline'
+      };
+      
+      // Check if we're offline and handle accordingly
       if (!navigator.onLine) {
-        // Store check-in data for later sync
-        await storePendingCheckIn({
-          eventId: decodedText,
-          userId: currentUser?.id,
-          timestamp: new Date().toISOString()
-        });
+        // Store enhanced check-in data for later sync
+        const storeSuccess = await storePendingCheckIn(checkInData);
         
         if (isMounted) {
-          setSuccessMessage('Check-in stored offline. Will sync when online.');
-          setSuccessSnackbar(true);
+          if (storeSuccess) {
+            setSuccessMessage('Check-in stored offline. Will sync when online.');
+            setSuccessSnackbar(true);
+            
+            // Add to notification for better user experience
+            if ('serviceWorker' in navigator) {
+              const registration = await navigator.serviceWorker.ready;
+              registration.showNotification('Offline Check-in Saved', {
+                body: `Your check-in for this event has been saved and will sync when you're back online.`,
+                icon: '/logo192.png',
+                badge: '/logo192.png',
+                tag: 'offline-checkin'
+              });
+            }
+          } else {
+            setError('Failed to store offline check-in. Please try again.');
+          }
           setProcessing(false);
         }
         return;
       }
       
-      // Online - process immediately
-      const response = await axios.post('/api/events/check-in', { 
-        eventId: decodedText,
-        userId: currentUser?.id 
-      });
-      
-      if (isMounted) {
-        if (response.data.success) {
-          setSuccessMessage(response.data.message || 'Check-in successful!');
-          setSuccessSnackbar(true);
-        } else {
-          setError(response.data.message || 'Check-in failed. Please try again.');
+      // Online - process immediately with retry capability
+      try {
+        const response = await axios.post('/api/events/check-in', checkInData);
+        
+        if (isMounted) {
+          if (response.data.success) {
+            setSuccessMessage(response.data.message || 'Check-in successful!');
+            setSuccessSnackbar(true);
+            
+            // Cache the updated event data if available
+            if (response.data.event) {
+              try {
+                // Import dynamically to avoid circular dependency
+                const { cacheEvents } = await import('../utils/offlineDataManager');
+                await cacheEvents([response.data.event]);
+              } catch (cacheErr) {
+                console.error('Failed to cache updated event data:', cacheErr);
+              }
+            }
+          } else {
+            setError(response.data.message || 'Check-in failed. Please try again.');
+          }
+        }
+      } catch (apiErr) {
+        console.error('API error during check-in:', apiErr);
+        
+        // If API call fails, fallback to offline storage
+        if (isMounted) {
+          try {
+            await storePendingCheckIn(checkInData);
+            setSuccessMessage('Server unavailable. Check-in saved offline.');
+            setSuccessSnackbar(true);
+          } catch (fallbackErr) {
+            setError('Check-in failed completely. Please try again later.');
+          }
         }
       }
     } catch (err) {

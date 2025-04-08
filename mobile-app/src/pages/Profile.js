@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Box, 
@@ -25,7 +25,6 @@ import {
   Chip,
   Badge,
   Switch,
-  FormControlLabel,
   Autocomplete,
   Snackbar
 } from '@mui/material';
@@ -38,7 +37,8 @@ import {
   AddCircle as AddIcon,
   Close as CloseIcon,
   Camera as CameraIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
+  Notifications as NotificationsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
@@ -67,7 +67,7 @@ const INTERESTS_LIST = [
 
 function Profile() {
   const navigate = useNavigate();
-  const { user, logout, updateUser } = useAuth();
+  const { user, logout, updateUser, isAuthenticated, refreshToken } = useAuth();
   
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,26 +81,149 @@ function Profile() {
   const [tempSkill, setTempSkill] = useState('');
   const [tempInterests, setTempInterests] = useState([]);
   
+  // Initialize with the known user data
+  const initialProfileData = useMemo(() => ({
+    name: user?.name || '',
+    email: user?.email || '',
+    role: user?.role || '',
+    // Other fields will be populated from API
+  }), [user]);
+
+  // Track online status
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // Check online status
+  useEffect(() => {
+    const handleOnlineStatusChange = () => {
+      setIsOffline(!navigator.onLine);
+    };
+    
+    window.addEventListener('online', handleOnlineStatusChange);
+    window.addEventListener('offline', handleOnlineStatusChange);
+    
+    return () => {
+      window.removeEventListener('online', handleOnlineStatusChange);
+      window.removeEventListener('offline', handleOnlineStatusChange);
+    };
+  }, []);
+
   // Load profile data on component mount
   useEffect(() => {
+    const PROFILE_STORAGE_KEY = 'seekup_profile_data';
+
     const fetchProfile = async () => {
+      if (!user) {
+        setError('You need to be logged in to view your profile.');
+        setLoading(false);
+        return;
+      }
+      
+      // If not authenticated, don't attempt to fetch
+      if (!isAuthenticated) {
+        setError('You need to be logged in to view your profile.');
+        setLoading(false);
+        return;
+      }
+      
       try {
         setLoading(true);
         setError(null);
         
-        const response = await axios.get('/api/users/profile');
-        setProfileData(response.data);
+        // If we're offline, use cached data if available
+        if (isOffline) {
+          const cachedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
+          if (cachedProfile) {
+            try {
+              const parsedProfile = JSON.parse(cachedProfile);
+              setProfileData(parsedProfile);
+              setError('Using cached profile data. Some information may not be up to date.');
+            } catch (parseError) {
+              console.error('Error parsing cached profile data:', parseError);
+              setProfileData(initialProfileData);
+              setError('Error loading cached profile. Using basic information.');
+            }
+          } else {
+            // If no cached data, use whatever we have from context
+            setProfileData(initialProfileData);
+            setError('You are offline. Using basic profile information.');
+          }
+          setLoading(false);
+          return;
+        }
         
+        // Online flow - fetch from API
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('No authentication token found');
+        }
+        
+        const response = await axios.get('/api/users/profile', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        const fetchedProfile = response.data.user || response.data;
+        
+        // Cache the profile data for offline use
+        localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(fetchedProfile));
+        
+        setProfileData(fetchedProfile);
         setLoading(false);
+        
       } catch (err) {
         console.error('Error fetching profile:', err);
-        setError('Failed to load profile data. Please try again.');
+        
+        // Check if it's an authentication error
+        if (err.response && err.response.status === 401) {
+          // Try to refresh the token and retry
+          try {
+            await refreshToken();
+            
+            // Retry the API call with the new token
+            const newToken = localStorage.getItem('token');
+            if (newToken) {
+              const response = await axios.get('/api/users/profile', {
+                headers: {
+                  'Authorization': `Bearer ${newToken}`
+                }
+              });
+              
+              const fetchedProfile = response.data.user || response.data;
+              localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(fetchedProfile));
+              setProfileData(fetchedProfile);
+              setLoading(false);
+              return;
+            }
+          } catch (refreshError) {
+            console.error('Error refreshing token:', refreshError);
+            // Continue to fallback below
+          }
+        }
+        
+        // Fallback to cached data if available
+        const cachedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
+        if (cachedProfile) {
+          try {
+            setProfileData(JSON.parse(cachedProfile));
+            setError('Failed to update profile. Using cached data.');
+          } catch (parseError) {
+            console.error('Error parsing cached profile:', parseError);
+            setProfileData(initialProfileData);
+            setError('Error loading profile. Using basic information.');
+          }
+        } else {
+          // Last resort - use basic data from auth context
+          setProfileData(initialProfileData);
+          setError('An error occurred. Using basic profile information.');
+        }
         setLoading(false);
       }
     };
     
     fetchProfile();
-  }, []);
+    // Include all dependencies used in the effect
+  }, [initialProfileData, user, isOffline, isAuthenticated, refreshToken]);
   
   // Handle edit dialog
   const handleOpenEditDialog = (field, value) => {
@@ -115,6 +238,7 @@ function Profile() {
       if (!editField) return;
       
       setSaving(true);
+      setError(null);
       
       // Update the profile data locally first
       let updatedProfile = { ...profileData };
@@ -130,11 +254,16 @@ function Profile() {
         updatedProfile[editField] = editValue;
       }
       
-      // Call API to update profile
+          // Call API to update profile
       await axios.put('/api/users/profile', { 
         [editField]: editValue 
+      }, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
       });
       
+      // Update local state
       setProfileData(updatedProfile);
       setSaving(false);
       setEditDialogOpen(false);
@@ -706,6 +835,26 @@ function Profile() {
             </Typography>
             
             <List>
+              <ListItem button>
+                <ListItemIcon>
+                  <SettingsIcon />
+                </ListItemIcon>
+                <ListItemText 
+                  primary="Settings" 
+                  secondary="App preferences"
+                />
+              </ListItem>
+              
+              <ListItem button onClick={() => navigate('/notifications/settings')}>
+                <ListItemIcon>
+                  <NotificationsIcon />
+                </ListItemIcon>
+                <ListItemText 
+                  primary="Notification Settings" 
+                  secondary="Manage notification preferences"
+                />
+              </ListItem>
+              
               <ListItem>
                 <ListItemIcon>
                   <SettingsIcon />

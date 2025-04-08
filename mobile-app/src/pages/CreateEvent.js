@@ -29,10 +29,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import {
   ArrowBack as BackIcon,
   Add as AddIcon,
-  Close as CloseIcon,
   Image as ImageIcon,
-  AccessTime as TimeIcon,
-  LocationOn as LocationIcon,
   People as PeopleIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
@@ -327,6 +324,33 @@ function CreateEvent() {
     setActiveStep(prev => prev - 1);
   };
   
+  // Function to store event locally for offline use
+  const storeLocalEvent = async (eventData) => {
+    try {
+      const localEvents = JSON.parse(localStorage.getItem('seekup_offline_events') || '[]');
+      
+      // Generate a temporary ID for the event
+      const tempId = `temp_${Date.now()}_${Math.floor(Math.random() * 1000)}`;      
+      const newEvent = {
+        id: tempId,
+        ...eventData,
+        createdAt: new Date().toISOString(),
+        createdBy: user?.id || 'unknown',
+        organizerName: user?.name || 'Unknown Organizer',
+        organizerLogo: user?.avatar || null,
+        isPending: true, // Flag to indicate this event is pending sync
+      };
+      
+      localEvents.push(newEvent);
+      localStorage.setItem('seekup_offline_events', JSON.stringify(localEvents));
+      
+      return tempId;
+    } catch (error) {
+      console.error('Error storing event locally:', error);
+      return null;
+    }
+  };
+  
   // Handle form submission
   const handleSubmit = async () => {
     // Validate the final step
@@ -337,6 +361,51 @@ function CreateEvent() {
     setLoading(true);
     setSubmitError(null);
     
+    // Check if we're offline
+    const isOffline = !navigator.onLine;
+    
+    // Prepare event data object (not FormData yet)
+    const eventDataObj = {
+      title: formData.title,
+      description: formData.description,
+      category: formData.category,
+      startDate: formData.startDate.toISOString(),
+      endDate: formData.endDate.toISOString(),
+      durationHours: formData.durationHours,
+      location: formData.location,
+      maxVolunteers: formData.maxVolunteers,
+      skillLevel: formData.skillLevel,
+      requiredSkills: formData.requiredSkills,
+      // We can't store the actual File object in localStorage, but we can store the preview URL
+      imagePreviewUrl: formData.imagePreviewUrl
+    };
+    
+    // If offline, store locally and navigate
+    if (isOffline) {
+      try {
+        const tempId = await storeLocalEvent(eventDataObj);
+        if (tempId) {
+          setLoading(false);
+          // Navigate to home with success message instead of event detail
+          // since the event detail would need to load from the API
+          navigate('/', { 
+            state: { 
+              message: 'Event created and saved offline. It will be synced when you reconnect.',
+              severity: 'info'
+            }
+          });
+        } else {
+          throw new Error('Failed to store event locally');
+        }
+      } catch (error) {
+        console.error('Error in offline event creation:', error);
+        setSubmitError('Failed to save event offline. Please check your device storage.');
+        setLoading(false);
+      }
+      return;
+    }
+    
+    // Online flow - create FormData for API call
     try {
       // Create form data for file upload
       const eventData = new FormData();
@@ -364,18 +433,47 @@ function CreateEvent() {
         eventData.append('eventImage', formData.image);
       }
       
+      // Ensure we have an authorization token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
       // Send request to create event
       const response = await axios.post('/api/events', eventData, {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`
         }
       });
       
-      // Navigate to the newly created event page
-      navigate(`/events/${response.data.id}`);
+      // Check if the response contains a valid event ID
+      if (response.data && response.data.id) {
+        // Navigate to the newly created event page
+        navigate(`/events/${response.data.id}`);
+      } else if (response.data && response.data._id) {
+        // Some APIs return _id instead of id
+        navigate(`/events/${response.data._id}`);
+      } else {
+        console.error('Invalid response format:', response.data);
+        // Navigate to home with success message if we can't get the ID
+        navigate('/', { 
+          state: { 
+            message: 'Event created successfully!',
+            severity: 'success'
+          }
+        });
+      }
     } catch (err) {
       console.error('Error creating event:', err);
-      setSubmitError(err.response?.data?.message || 'Failed to create event. Please try again.');
+      
+      // Check if it's an authentication error
+      if (err.response && err.response.status === 401) {
+        setSubmitError('Authentication error. Please log in again.');
+      } else {
+        setSubmitError(err.response?.data?.message || 'Failed to create event. Please try again.');
+      }
+      
       setLoading(false);
     }
   };

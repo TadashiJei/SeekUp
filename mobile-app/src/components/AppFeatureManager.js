@@ -16,7 +16,8 @@ import {
 import {
   Sync as SyncIcon,
   SignalWifiOff as OfflineIcon,
-  SignalWifi4Bar as OnlineIcon
+  SignalWifi4Bar as OnlineIcon,
+  Notifications as NotificationsIcon
 } from '@mui/icons-material';
 import { 
   requestNotificationPermission, 
@@ -28,6 +29,7 @@ import {
   syncWithServer,
   getPendingOperationCounts
 } from '../utils/offlineDataManager';
+import NotificationCenter from './notifications/NotificationCenter';
 
 /**
  * Component responsible for managing app features like notifications and offline support
@@ -43,6 +45,7 @@ function AppFeatureManager() {
   const [showOfflineAlert, setShowOfflineAlert] = useState(false);
   const [showOnlineAlert, setShowOnlineAlert] = useState(false);
   const [showSyncAlert, setShowSyncAlert] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(true);
   
   // Check for notification permission on mount
@@ -188,6 +191,18 @@ function AppFeatureManager() {
               )}
             </IconButton>
           )}
+          
+          <IconButton
+            onClick={() => setShowNotificationCenter(true)}
+            size="small"
+            sx={{ 
+              bgcolor: 'info.light', 
+              color: 'info.contrastText',
+              '&:hover': { bgcolor: 'info.main' } 
+            }}
+          >
+            <NotificationsIcon />
+          </IconButton>
         </Box>
       )}
       
@@ -258,6 +273,16 @@ function AppFeatureManager() {
             : "Failed to sync some items. Please try again."}
         </Alert>
       </Snackbar>
+      
+      {/* Notification Center */}
+      <NotificationCenter 
+        isOpen={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onNotificationClick={(notification) => {
+          // Handle notification click based on type
+          console.log('Notification clicked:', notification);
+        }}
+      />
     </>
   );
 }
